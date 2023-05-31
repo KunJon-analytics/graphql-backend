@@ -1,8 +1,6 @@
 import http from "http";
 import "reflect-metadata";
 
-// import { MikroORM } from "@mikro-orm/core";
-// import type { PostgreSqlDriver } from "@mikro-orm/postgresql";
 import { expressMiddleware } from "@apollo/server/express4";
 import { ApolloServerPluginDrainHttpServer } from "@apollo/server/plugin/drainHttpServer";
 import cors from "cors";
@@ -16,7 +14,6 @@ import { RedisClientType, createClient } from "redis";
 
 import { COOKIE_NAME, __prod__ } from "./constants";
 import { MyContext } from "./types";
-// import mikroConfig from "./mikro-orm.config";
 import { HelloResolver } from "./resolvers/hello";
 import { PostResolver } from "./resolvers/post";
 import { UserResolver } from "./resolvers/user";
@@ -27,9 +24,6 @@ const main = async () => {
   // and "synchronize" database schema, call "initialize()" method of a newly created database
   // once in your application bootstrap
   const dataSource = await AppDataSource.initialize();
-
-  // const orm = await MikroORM.init<PostgreSqlDriver>(mikroConfig);
-  // await orm.getMigrator().up();
 
   const app = express();
 

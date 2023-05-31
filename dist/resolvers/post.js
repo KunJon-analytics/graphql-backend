@@ -21,11 +21,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PostResolver = void 0;
+exports.PostResolver = exports.PaginatedPosts = void 0;
 const type_graphql_1 = require("type-graphql");
 const Post_1 = require("../entities/Post");
 const isAuth_1 = require("../middleware/isAuth");
 const User_1 = require("../entities/User");
+const typeorm_1 = require("typeorm");
 let PostInput = class PostInput {
 };
 __decorate([
@@ -39,11 +40,47 @@ __decorate([
 PostInput = __decorate([
     (0, type_graphql_1.InputType)()
 ], PostInput);
+let PaginatedPosts = class PaginatedPosts {
+};
+__decorate([
+    (0, type_graphql_1.Field)(() => [Post_1.Post]),
+    __metadata("design:type", Array)
+], PaginatedPosts.prototype, "posts", void 0);
+__decorate([
+    (0, type_graphql_1.Field)(),
+    __metadata("design:type", Boolean)
+], PaginatedPosts.prototype, "hasMore", void 0);
+PaginatedPosts = __decorate([
+    (0, type_graphql_1.ObjectType)()
+], PaginatedPosts);
+exports.PaginatedPosts = PaginatedPosts;
 let PostResolver = class PostResolver {
-    posts({ dataSource }) {
-        const postRepository = dataSource.getRepository(Post_1.Post);
-        const posts = postRepository.find();
-        return posts;
+    posts(limit, cursor, { dataSource }) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const realLimit = Math.min(50, limit);
+            const reaLimitPlusOne = realLimit + 1;
+            const replacements = [reaLimitPlusOne];
+            if (cursor) {
+                replacements.push(new Date(parseInt(cursor)));
+            }
+            const parsedCursor = cursor ? new Date(parseInt(cursor)) : new Date();
+            const postRepository = dataSource.getRepository(Post_1.Post);
+            const posts = yield postRepository.find({
+                relations: {
+                    creator: true,
+                },
+                where: {
+                    createdAt: (0, typeorm_1.LessThan)(parsedCursor),
+                },
+                order: { createdAt: "DESC" },
+                skip: 0,
+                take: reaLimitPlusOne,
+            });
+            return {
+                posts: posts.slice(0, realLimit),
+                hasMore: posts.length === reaLimitPlusOne,
+            };
+        });
     }
     post(id, { dataSource }) {
         const postRepository = dataSource.getRepository(Post_1.Post);
@@ -92,10 +129,12 @@ let PostResolver = class PostResolver {
     }
 };
 __decorate([
-    (0, type_graphql_1.Query)(() => [Post_1.Post]),
-    __param(0, (0, type_graphql_1.Ctx)()),
+    (0, type_graphql_1.Query)(() => PaginatedPosts),
+    __param(0, (0, type_graphql_1.Arg)("limit", () => type_graphql_1.Int)),
+    __param(1, (0, type_graphql_1.Arg)("cursor", () => String, { nullable: true })),
+    __param(2, (0, type_graphql_1.Ctx)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Number, Object, Object]),
     __metadata("design:returntype", Promise)
 ], PostResolver.prototype, "posts", null);
 __decorate([
@@ -133,7 +172,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], PostResolver.prototype, "deletePost", null);
 PostResolver = __decorate([
-    (0, type_graphql_1.Resolver)()
+    (0, type_graphql_1.Resolver)(Post_1.Post)
 ], PostResolver);
 exports.PostResolver = PostResolver;
 //# sourceMappingURL=post.js.map

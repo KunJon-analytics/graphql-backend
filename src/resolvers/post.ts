@@ -7,12 +7,17 @@ import {
   UseMiddleware,
   InputType,
   Field,
+  ObjectType,
+  Int,
+  // FieldResolver,
+  // Root,
 } from "type-graphql";
 
 import { MyContext } from "src/types";
 import { Post } from "../entities/Post";
 import { isAuth } from "../middleware/isAuth";
 import { User } from "../entities/User";
+import { LessThan } from "typeorm";
 
 @InputType()
 class PostInput {
@@ -22,13 +27,83 @@ class PostInput {
   text: string;
 }
 
-@Resolver()
+@ObjectType()
+export class PaginatedPosts {
+  @Field(() => [Post])
+  posts: Post[];
+  @Field()
+  hasMore: boolean;
+}
+
+@Resolver(Post)
 export class PostResolver {
-  @Query(() => [Post])
-  posts(@Ctx() { dataSource }: MyContext): Promise<Post[]> {
+  // @FieldResolver(() => User)
+  // creator(@Root() post: Post) {
+  //   return post;
+  // }
+
+  @Query(() => PaginatedPosts)
+  async posts(
+    @Arg("limit", () => Int) limit: number,
+    @Arg("cursor", () => String, { nullable: true }) cursor: string | null,
+    @Ctx() { dataSource }: MyContext
+  ): Promise<PaginatedPosts> {
+    // 20 -> 21
+    const realLimit = Math.min(50, limit);
+    const reaLimitPlusOne = realLimit + 1;
+
+    const replacements: any[] = [reaLimitPlusOne];
+
+    if (cursor) {
+      replacements.push(new Date(parseInt(cursor)));
+    }
+
+    const parsedCursor = cursor ? new Date(parseInt(cursor)) : new Date();
+
     const postRepository = dataSource.getRepository(Post);
-    const posts = postRepository.find();
-    return posts;
+    const posts = await postRepository.find({
+      relations: {
+        creator: true,
+      },
+      where: {
+        createdAt: LessThan(parsedCursor),
+      },
+      order: { createdAt: "DESC" },
+      skip: 0,
+      take: reaLimitPlusOne,
+    });
+
+    // const posts = await dataSource.query(
+    //   `
+    // select p.*
+    // from post p
+    // ${cursor ? `where p."createdAt" < $2` : ""}
+    // order by p."createdAt" DESC
+    // limit $1
+    // `,
+    //   replacements
+    // );
+
+    // const qb = getConnection()
+    //   .getRepository(Post)
+    //   .createQueryBuilder("p")
+    //   .innerJoinAndSelect("p.creator", "u", 'u.id = p."creatorId"')
+    //   .orderBy('p."createdAt"', "DESC")
+    //   .take(reaLimitPlusOne);
+
+    // if (cursor) {
+    //   qb.where('p."createdAt" < :cursor', {
+    //     cursor: new Date(parseInt(cursor)),
+    //   });
+    // }
+
+    // const posts = await qb.getMany();
+    // console.log("posts: ", posts);
+
+    return {
+      posts: posts.slice(0, realLimit),
+      hasMore: posts.length === reaLimitPlusOne,
+    };
   }
 
   @Query(() => Post, { nullable: true })
