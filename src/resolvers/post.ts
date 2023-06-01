@@ -9,15 +9,16 @@ import {
   Field,
   ObjectType,
   Int,
-  // FieldResolver,
-  // Root,
+  FieldResolver,
+  Root,
 } from "type-graphql";
 
 import { MyContext } from "src/types";
 import { Post } from "../entities/Post";
 import { isAuth } from "../middleware/isAuth";
 import { User } from "../entities/User";
-import { LessThan } from "typeorm";
+import { FindManyOptions, LessThan } from "typeorm";
+import { Updoot } from "../entities/Updoot";
 
 @InputType()
 class PostInput {
@@ -37,10 +38,10 @@ export class PaginatedPosts {
 
 @Resolver(Post)
 export class PostResolver {
-  // @FieldResolver(() => User)
-  // creator(@Root() post: Post) {
-  //   return post;
-  // }
+  @FieldResolver(() => String)
+  textSnippet(@Root() post: Post) {
+    return post.text.substring(0, 50);
+  }
 
   @Query(() => PaginatedPosts)
   async posts(
@@ -52,53 +53,29 @@ export class PostResolver {
     const realLimit = Math.min(50, limit);
     const reaLimitPlusOne = realLimit + 1;
 
-    const replacements: any[] = [reaLimitPlusOne];
-
-    if (cursor) {
-      replacements.push(new Date(parseInt(cursor)));
-    }
-
-    const parsedCursor = cursor ? new Date(parseInt(cursor)) : new Date();
+    const options: FindManyOptions<Post> = cursor
+      ? {
+          relations: {
+            creator: true,
+          },
+          where: {
+            createdAt: LessThan(new Date(parseInt(cursor))),
+          },
+          order: { createdAt: "DESC" },
+          skip: 0,
+          take: reaLimitPlusOne,
+        }
+      : {
+          relations: {
+            creator: true,
+          },
+          order: { createdAt: "DESC" },
+          skip: 0,
+          take: reaLimitPlusOne,
+        };
 
     const postRepository = dataSource.getRepository(Post);
-    const posts = await postRepository.find({
-      relations: {
-        creator: true,
-      },
-      where: {
-        createdAt: LessThan(parsedCursor),
-      },
-      order: { createdAt: "DESC" },
-      skip: 0,
-      take: reaLimitPlusOne,
-    });
-
-    // const posts = await dataSource.query(
-    //   `
-    // select p.*
-    // from post p
-    // ${cursor ? `where p."createdAt" < $2` : ""}
-    // order by p."createdAt" DESC
-    // limit $1
-    // `,
-    //   replacements
-    // );
-
-    // const qb = getConnection()
-    //   .getRepository(Post)
-    //   .createQueryBuilder("p")
-    //   .innerJoinAndSelect("p.creator", "u", 'u.id = p."creatorId"')
-    //   .orderBy('p."createdAt"', "DESC")
-    //   .take(reaLimitPlusOne);
-
-    // if (cursor) {
-    //   qb.where('p."createdAt" < :cursor', {
-    //     cursor: new Date(parseInt(cursor)),
-    //   });
-    // }
-
-    // const posts = await qb.getMany();
-    // console.log("posts: ", posts);
+    const posts = await postRepository.find(options);
 
     return {
       posts: posts.slice(0, realLimit),
@@ -112,7 +89,10 @@ export class PostResolver {
     @Ctx() { dataSource }: MyContext
   ): Promise<Post | null> {
     const postRepository = dataSource.getRepository(Post);
-    const post = postRepository.findOneBy({ id });
+    const post = postRepository.findOne({
+      relations: { creator: true },
+      where: { id },
+    });
     return post;
   }
 
@@ -167,6 +147,50 @@ export class PostResolver {
       return false;
     }
     await postRepository.remove(post);
+    return true;
+  }
+
+  @Mutation(() => Boolean)
+  @UseMiddleware(isAuth)
+  async vote(
+    @Arg("postId", () => Int) postId: number,
+    @Arg("value", () => Int) value: number,
+    @Ctx() { req, dataSource }: MyContext
+  ) {
+    const isUpdoot = value !== -1;
+    const realValue = isUpdoot ? 1 : -1;
+    const { userId } = req.session;
+
+    const updootRepository = dataSource.getRepository(Updoot);
+    const postRepository = dataSource.getRepository(Post);
+
+    const updoot = await updootRepository.findOne({
+      where: { postId, userId },
+    });
+    const post = await postRepository.findOneBy({ id: postId });
+
+    if (!post) {
+      return false;
+    }
+
+    // the user has voted on the post before
+    // and they are changing their vote
+
+    if (updoot && updoot.value !== realValue) {
+      updoot.value = realValue;
+      post.points = post.points + realValue * 2;
+      await updootRepository.save(updoot);
+      await postRepository.save(post);
+    } else if (!updoot) {
+      // has never voted before
+      const updoot = new Updoot();
+      updoot.userId = userId as number;
+      updoot.postId = postId;
+      updoot.value = realValue;
+      post.points = post.points + realValue;
+      await updootRepository.save(updoot);
+      await postRepository.save(post);
+    }
     return true;
   }
 }

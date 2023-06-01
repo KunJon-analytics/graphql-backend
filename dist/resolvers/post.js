@@ -27,6 +27,7 @@ const Post_1 = require("../entities/Post");
 const isAuth_1 = require("../middleware/isAuth");
 const User_1 = require("../entities/User");
 const typeorm_1 = require("typeorm");
+const Updoot_1 = require("../entities/Updoot");
 let PostInput = class PostInput {
 };
 __decorate([
@@ -55,27 +56,35 @@ PaginatedPosts = __decorate([
 ], PaginatedPosts);
 exports.PaginatedPosts = PaginatedPosts;
 let PostResolver = class PostResolver {
+    textSnippet(post) {
+        return post.text.substring(0, 50);
+    }
     posts(limit, cursor, { dataSource }) {
         return __awaiter(this, void 0, void 0, function* () {
             const realLimit = Math.min(50, limit);
             const reaLimitPlusOne = realLimit + 1;
-            const replacements = [reaLimitPlusOne];
-            if (cursor) {
-                replacements.push(new Date(parseInt(cursor)));
-            }
-            const parsedCursor = cursor ? new Date(parseInt(cursor)) : new Date();
+            const options = cursor
+                ? {
+                    relations: {
+                        creator: true,
+                    },
+                    where: {
+                        createdAt: (0, typeorm_1.LessThan)(new Date(parseInt(cursor))),
+                    },
+                    order: { createdAt: "DESC" },
+                    skip: 0,
+                    take: reaLimitPlusOne,
+                }
+                : {
+                    relations: {
+                        creator: true,
+                    },
+                    order: { createdAt: "DESC" },
+                    skip: 0,
+                    take: reaLimitPlusOne,
+                };
             const postRepository = dataSource.getRepository(Post_1.Post);
-            const posts = yield postRepository.find({
-                relations: {
-                    creator: true,
-                },
-                where: {
-                    createdAt: (0, typeorm_1.LessThan)(parsedCursor),
-                },
-                order: { createdAt: "DESC" },
-                skip: 0,
-                take: reaLimitPlusOne,
-            });
+            const posts = yield postRepository.find(options);
             return {
                 posts: posts.slice(0, realLimit),
                 hasMore: posts.length === reaLimitPlusOne,
@@ -84,7 +93,10 @@ let PostResolver = class PostResolver {
     }
     post(id, { dataSource }) {
         const postRepository = dataSource.getRepository(Post_1.Post);
-        const post = postRepository.findOneBy({ id });
+        const post = postRepository.findOne({
+            relations: { creator: true },
+            where: { id },
+        });
         return post;
     }
     createPost(input, { req, dataSource }) {
@@ -127,7 +139,46 @@ let PostResolver = class PostResolver {
             return true;
         });
     }
+    vote(postId, value, { req, dataSource }) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const isUpdoot = value !== -1;
+            const realValue = isUpdoot ? 1 : -1;
+            const { userId } = req.session;
+            const updootRepository = dataSource.getRepository(Updoot_1.Updoot);
+            const postRepository = dataSource.getRepository(Post_1.Post);
+            const updoot = yield updootRepository.findOne({
+                where: { postId, userId },
+            });
+            const post = yield postRepository.findOneBy({ id: postId });
+            if (!post) {
+                return false;
+            }
+            if (updoot && updoot.value !== realValue) {
+                updoot.value = realValue;
+                post.points = post.points + realValue * 2;
+                yield updootRepository.save(updoot);
+                yield postRepository.save(post);
+            }
+            else if (!updoot) {
+                const updoot = new Updoot_1.Updoot();
+                updoot.userId = userId;
+                updoot.postId = postId;
+                updoot.value = realValue;
+                post.points = post.points + realValue;
+                yield updootRepository.save(updoot);
+                yield postRepository.save(post);
+            }
+            return true;
+        });
+    }
 };
+__decorate([
+    (0, type_graphql_1.FieldResolver)(() => String),
+    __param(0, (0, type_graphql_1.Root)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Post_1.Post]),
+    __metadata("design:returntype", void 0)
+], PostResolver.prototype, "textSnippet", null);
 __decorate([
     (0, type_graphql_1.Query)(() => PaginatedPosts),
     __param(0, (0, type_graphql_1.Arg)("limit", () => type_graphql_1.Int)),
@@ -171,6 +222,16 @@ __decorate([
     __metadata("design:paramtypes", [Number, Object]),
     __metadata("design:returntype", Promise)
 ], PostResolver.prototype, "deletePost", null);
+__decorate([
+    (0, type_graphql_1.Mutation)(() => Boolean),
+    (0, type_graphql_1.UseMiddleware)(isAuth_1.isAuth),
+    __param(0, (0, type_graphql_1.Arg)("postId", () => type_graphql_1.Int)),
+    __param(1, (0, type_graphql_1.Arg)("value", () => type_graphql_1.Int)),
+    __param(2, (0, type_graphql_1.Ctx)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Number, Number, Object]),
+    __metadata("design:returntype", Promise)
+], PostResolver.prototype, "vote", null);
 PostResolver = __decorate([
     (0, type_graphql_1.Resolver)(Post_1.Post)
 ], PostResolver);
